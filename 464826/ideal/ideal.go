@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"math"
 	"time"
 )
 
@@ -13,33 +12,26 @@ type StockPrice struct {
 	Price float64
 }
 
-// CalculateStats calculates the sum, average, and trend of stock prices.
-func CalculateStats(ctx context.Context, prices []StockPrice) (sum, average, trend float64) {
+// CalculateStats calculates the sum and average of stock prices for a given period.
+func CalculateStats(ctx context.Context, prices []StockPrice) (sum, average float64) {
 	totalPrice := 0.0
 	count := 0
-	prevPrice := 0.0
 
 	for _, price := range prices {
 		select {
 		case <-ctx.Done():
-			return 0, 0, 0 // Cancel operation gracefully
+			return 0, 0 // Cancel operation gracefully
 		default:
 			totalPrice += price.Price
 			count++
-
-			if count > 1 {
-				trend = price.Price - prevPrice
-			}
-
-			prevPrice = price.Price
 		}
 	}
 
 	if count == 0 {
-		return 0, 0, 0 // Avoid division by zero
+		return 0, 0 // Avoid division by zero
 	}
 
-	return totalPrice, totalPrice / float64(count), trend
+	return totalPrice, totalPrice / float64(count)
 }
 
 // FetchData simulates fetching stock price data.
@@ -57,11 +49,9 @@ func FetchData(ctx context.Context) ([]StockPrice, error) {
 		time.Date(2023, 10, 1, 0, 0, 0, 0, time.UTC),
 		time.Date(2023, 10, 2, 0, 0, 0, 0, time.UTC),
 		time.Date(2023, 10, 3, 0, 0, 0, 0, time.UTC),
-		time.Date(2023, 10, 4, 0, 0, 0, 0, time.UTC),
-		time.Date(2023, 10, 5, 0, 0, 0, 0, time.UTC),
 	}
 
-	prices := []float64{100.0, 101.0, 102.0, 103.0, 104.0}
+	prices := []float64{100.0, 101.0, 102.0}
 
 	return zipData(dates, prices), nil
 }
@@ -89,15 +79,9 @@ func main() {
 	}
 
 	// Calculate statistics
-	sum, average, trend := CalculateStats(ctx, prices)
+	sum, average := CalculateStats(ctx, prices)
 
 	// Display results
 	fmt.Printf("Sum of prices: %.2f\n", sum)
 	fmt.Printf("Average price: %.2f\n", average)
-	fmt.Printf("Trend of prices: %.2f\n", trend)
-
-	// Suggestion: Extend the program to calculate moving averages
-	fmt.Println("\nSuggestion: Extend the program to calculate moving averages.")
-	fmt.Println("You can implement a function to calculate N-day moving averages.")
-	fmt.Println("Example: Calculate 3-day moving average for the given prices.")
 }
