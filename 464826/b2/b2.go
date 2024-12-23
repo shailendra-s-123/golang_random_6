@@ -1,104 +1,121 @@
 package main
 
 import (
-"context"
-"fmt"
-"time"
+	"context"
+	"errors"
+	"fmt"
+	"math"
+	"math/rand"
+	"sync"
+	"time"
 )
 
-// StockPrice represents a stock price entry with a date and a price.
+// StockPrice represents a stock price entry.
 type StockPrice struct {
-Date time.Time
-Price float64
+	Date  time.Time
+	Price float64
 }
 
-// FetchData simulates fetching stock price data. It uses the context to handle cancellations.
-func FetchData(ctx context.Context) ([]StockPrice, error) {
-// Simulate fetching data from a database or external API. Adding a delay for demonstration.
-select {
-case <-ctx.Done():
-// If the context is done, return an error.
-return nil, ctx.Err()
-case <-time.After(2 * time.Second):
-// Simulating a successful fetch with 2 seconds delay.
+// CalculateStats calculates the sum, average, and standard deviation of stock prices for a given period.
+func CalculateStats(ctx context.Context, prices []StockPrice) (sum, average, stdDev float64, err error) {
+	wg := sync.WaitGroup{}
+	var results []float64
+
+	wg.Add(3)
+	// Calculate sum and average concurrently
+	go func() {
+		defer wg.Done()
+		sum, average, err = calculateSumAndAverage(prices)
+	}()
+
+	// Calculate standard deviation concurrently
+	go func() {
+		defer wg.Done()
+		results = calculateStandardDeviation(prices, average)
+	}()
+
+	wg.Wait()
+
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	// Calculate standard deviation
+	if len(results) > 0 {
+		sumSquares := 0.0
+		for _, result := range results {
+			sumSquares += result * result
+		}
+		stdDev = math.Sqrt(sumSquares / float64(len(results)))
+	}
+
+	return
 }
 
-// Example data with 3 dates and corresponding prices.
-dates := []time.Time{
-time.Date(2023, 7, 28, 0, 0, 0, 0, time.UTC),
-time.Date(2023, 7, 29, 0, 0, 0, 0, time.UTC),
-time.Date(2023, 7, 30, 0, 0, 0, 0, time.UTC),
+// calculateSumAndAverage calculates the sum and average of stock prices.
+func calculateSumAndAverage(prices []StockPrice) (sum, average float64, err error) {
+	if len(prices) == 0 {
+		return 0, 0, errors.New("no prices to calculate")
+	}
+
+	var totalPrice float64
+	for _, price := range prices {
+		totalPrice += price.Price
+	}
+
+	return totalPrice, totalPrice / float64(len(prices)), nil
 }
 
-prices := []float64{100.0, 101.5, 102.0}
+// calculateStandardDeviation calculates the standard deviation of stock prices.
+func calculateStandardDeviation(prices []StockPrice, average float64) []float64 {
+	var deviations []float64
+	for _, price := range prices {
+		deviation := price.Price - average
+		deviations = append(deviations, deviation)
+	}
 
-// Combine the date and price data into a slice of StockPrice.
-return zipData(dates, prices), nil
-}
-
-// zipData combines two slices into a slice of StockPrice structs.
-func zipData(dates []time.Time, prices []float64) []StockPrice {
-var data []StockPrice
-// Iterate over dates slice and combine with prices.
-for i := range dates {
-if i < len(prices) {
-// Create StockPrice instances and append to the data slice.
-data = append(data, StockPrice{dates[i], prices[i]})
-}
-}
-return data
+	return deviations
 }
 
-// CalculateStats calculates the sum and average of stock prices. It also respects the context for handling cancellations.
-func CalculateStats(ctx context.Context, prices []StockPrice) (sum, average float64) {
-totalPrice := 0.0
-count := 0
+// FetchData simulates fetching stock price data with a random delay.
+func FetchData(ctx context.Context, numDays int) ([]StockPrice, error) {
+	if numDays <= 0 {
+		return nil, errors.New("numDays must be a positive integer")
+	}
 
-// Iterating over the stock prices while checking for cancellation.
-for _, price := range prices {
-select {
-case <-ctx.Done():
-// If the context is canceled, gracefully return.
-return 0, 0
-default:
-// Accumulate total price and count of stock prices.
-totalPrice += price.Price
-count++
-}
-}
+	// Simulate delay for data fetching
+	delay := time.Duration(rand.Intn(5)) * time.Second
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(delay):
+	}
 
-// Avoid division by zero if no prices are present.
-if count == 0 {
-return 0, 0
-}
+	// Generate random stock prices for the specified number of days
+	var prices []StockPrice
+	currentDate := time.Now()
+	for i := 0; i < numDays; i++ {
+		price := rand.Float64() * 100 // Generate random price between 0 and 100
+		prices = append(prices, StockPrice{Date: currentDate, Price: price})
+		currentDate = currentDate.AddDate(0, 0, 1)
+	}
 
-// Return the sum and average of the stock prices.
-return totalPrice, totalPrice / float64(count)
-}
-
-// calculateTrends calculates the trend of stock prices by comparing consecutive prices.
-func calculateTrends(prices []StockPrice) []string {
-trends := make([]string, 0, len(prices)-1)
-for i := 1; i < len(prices); i++ {
-if prices[i].Price > prices[i-1].Price {
-trends = append(trends, "Up")
-} else if prices[i].Price < prices[i-1].Price {
-trends = append(trends, "Down")
-} else {
-trends = append(trends, "Flat")
-}
-}
-return trends
+	return prices, nil
 }
 
 func main() {
-// Create a context with a timeout of 5 seconds.
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-defer cancel() // Ensure cancellation of the context once the main function completes.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-// Fetch the stock price data.
-prices, err := FetchData(ctx)
-if err != nil {
-// Handle error if data fetching fails or is canceled.
-fmt.Printf("Error fetching data: %v\n", err)
-return
+	numDays := 10
+	fmt.Printf("Fetching data for %d days...\n", numDays)
+
+	// Fetch stock price data
+	prices, err := FetchData(ctx, numDays)
+	if err != nil {
+		fmt.Printf("Error fetching data: %v\n", err)
+		return
+	}
+
+	// Calculate statistics
+	sum, average, stdDev, err := CalculateStats(ctx, prices)
