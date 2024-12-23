@@ -1,54 +1,52 @@
 package main  
 import (  
-    "bufio"  
-    "fmt"  
-    "io"  
-    "os"  
-)  
-const (  
-    bufferSize = 64 * 1024  
-)  
-func main() {  
-    // Open the input file for reading  
-    inputFile, err := os.Open("input.txt")  
-    if err != nil {  
-        fmt.Println("Error opening input file:", err)  
-        return  
-    }  
-    defer inputFile.Close()  
-    // Create a buffered reader for efficient reading  
-    reader := bufio.NewReaderSize(inputFile, bufferSize)  
-    // Open the output file for writing  
-    outputFile, err := os.Create("output.txt")  
-    if err != nil {  
-        fmt.Println("Error opening output file:", err)  
-        return  
-    }  
-    defer outputFile.Close()  
-    // Create a buffered writer for efficient writing  
-    writer := bufio.NewWriterSize(outputFile, bufferSize)  
-    // Read and write data in chunks  
-    for {  
-        buf := make([]byte, bufferSize)  
-        n, err := reader.Read(buf)  
-        if err != nil {  
-            if err == io.EOF {  
-                break  
-            }  
-            fmt.Println("Error reading from file:", err)  
-            return  
-        }  
-        _, err = writer.Write(buf[:n])  
-        if err != nil {  
-            fmt.Println("Error writing to file:", err)  
-            return  
-        }  
-    }  
-    // Flush the writer to ensure all data is written to the file  
-    err = writer.Flush()  
-    if err != nil {  
-        fmt.Println("Error flushing writer:", err)  
-        return  
-    }  
-    fmt.Println("File I/O operation completed successfully.")  
+    "fmt"
+    "io"
+    "os"
+)
+
+const bufferSize = 1 << 20 // 1 MB buffer size
+
+func main() {
+    sourceFile := "source_file.txt"
+    destinationFile := "destination_file.txt"
+    // Read data from the source file using a slice with a buffer size
+    file, err := os.Open(sourceFile)
+    if err != nil {
+        fmt.Println("Error opening source file:", err)
+        return
+    }
+    defer file.Close()
+
+    data := make([]byte, bufferSize)
+    writer, err := os.Create(destinationFile)
+    if err != nil {
+        fmt.Println("Error creating destination file:", err)
+        return
+    }
+    defer writer.Close()
+
+    for {
+        n, err := file.Read(data)
+        if err == io.EOF {
+            break
+        }
+        if err != nil {
+            fmt.Println("Error reading data:", err)
+            return
+        }
+        _, err = writer.Write(data[:n])
+        if err != nil {
+            fmt.Println("Error writing data:", err)
+            return
+        }
+    }
+
+    // Optionally, you can flush the writer to ensure all data is written to the file
+    err = writer.Sync()
+    if err != nil {
+        fmt.Println("Error syncing writer:", err)
+    }
+
+    fmt.Println("Data copied successfully!")
 }  
