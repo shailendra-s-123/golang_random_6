@@ -1,77 +1,109 @@
 package main
 
 import (
-	"bufio"
+	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
+	"sync"
 	"time"
 )
 
-const bufferSize = 4096
+const (
+	filePath     = "largefile.txt"
+	bufferSize    = 1024 * 64 // 64KB buffer size
+	numWorkers    = 4
+	bufferThread = 2
+)
 
-func readFileEfficiently(filePath string) error {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	reader := bufio.NewReaderSize(file, bufferSize)
-
-	var data []byte
+func readBuf(ctx context.Context, reader *bufio.Reader, outputChan chan<- []byte, wg *sync.WaitGroup) {
+	defer wg.Done()
 	for {
-		n, err := reader.Read(data[:cap(data)])
-		if n == 0 {
-			break // End of file
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			buf := make([]byte, bufferSize)
+			n, err := reader.Read(buf)
+			if err != nil {
+				if err == io.EOF {
+					return
+				}
+				fmt.Printf("Error reading file: %v\n", err)
+				return
+			}
+			outputChan <- buf[:n]
 		}
-		if err != nil && err != io.EOF {
-			return err
-		}
-
-		data = data[:n] // Slice the data to the actual number of bytes read
-		// Process the data here
-		fmt.Println(string(data))
 	}
-
-	return nil
 }
 
-func writeFileEfficiently(filePath string, data []byte) error {
-	file, err := os.Create(filePath)
-	if err != nil {
-		return err
+func writeBuf(ctx context.Context, writer *bufio.Writer, inputChan <-chan []byte, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			writer.Flush() // Ensure any buffered data is written out
+			return
+		default:
+			buf := <-inputChan
+			_, err := writer.Write(buf)
+			if err != nil {
+				fmt.Printf("Error writing file: %v\n", err)
+				return
+			}
+		}
 	}
-	defer file.Close()
-
-	writer := bufio.NewWriterSize(file, bufferSize)
-
-	_, err = writer.Write(data)
-	if err != nil {
-		return err
-	}
-
-	return writer.Flush()
 }
 
 func main() {
-	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	// Read a file
-	err := readFileEfficiently("input.txt")
-	if err != nil {
-		fmt.Println("Error reading file:", err)
+	// Check if the file exists
+	_, err := os.Stat(filePath)
+	if os.IsNotExist(err) {
+		fmt.Printf("File not found: %v\n", filePath)
 		return
 	}
 
-	// Write data to a file
-	data := []byte("Hello, world!")
-	err = writeFileEfficiently("output.txt", data)
+	inputChan := make(chan []byte, bufferThread)
+	outputChan := make(chan []byte, bufferThread)
+
+	var wg sync.WaitGroup
+	wg.Add(numWorkers + 2) // Number of reader goroutines + 1 writer goroutine + 1 for closing
+
+	file, err := os.Open(filePath)
 	if err != nil {
-		fmt.Println("Error writing file:", err)
+		fmt.Printf("Error opening file: %v\n", err)
+		return
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+	for i := 0; i < numWorkers; i++ {
+		go readBuf(ctx, reader, inputChan, &wg)
+	}
+
+	destinationFile, err := os.CreateTemp("", "out-")
+	if err != nil {
+		fmt.Printf("Error creating output file: %v\n", err)
+		return
+	}
+	defer destinationFile.Close()
+
+	writer := bufio.NewWriter(destinationFile)
+	go writeBuf(ctx, writer, outputChan, &wg)
+
+	close(inputChan)
+	close(outputChan)
+	wg.Wait()
+
+	content, err := ioutil.ReadFile(destinationFile.Name())
+	if err != nil {
+		fmt.Printf("Error reading destination file: %v\n", err)
 		return
 	}
 
-	elapsed := time.Since(start)
-	fmt.Println("File I/O completed in:", elapsed)
+	fmt.Println(string(content))
 }

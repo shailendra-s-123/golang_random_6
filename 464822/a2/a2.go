@@ -4,74 +4,82 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"time"
+
+	"github.com/golang/snappy"
 )
 
-const bufferSize = 8192
-
-func readFileEfficiently(filePath string) error {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	reader := bufio.NewReaderSize(file, bufferSize)
-
-	var data []byte
-	for {
-		n, err := reader.Read(data[:cap(data)])
-		if n == 0 {
-			break // End of file
-		}
-		if err != nil && err != io.EOF {
-			return err
-		}
-
-		data = data[:n] // Slice the data to the actual number of bytes read
-		// Process the data here
-		fmt.Println(string(data))
-	}
-
-	return nil
-}
-
-func writeFileEfficiently(filePath string, data []byte) error {
-	file, err := os.Create(filePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	writer := bufio.NewWriterSize(file, bufferSize)
-
-	_, err = writer.Write(data)
-	if err != nil {
-		return err
-	}
-
-	return writer.Flush()
-}
+const bufferSize = 64 * 1024
 
 func main() {
 	start := time.Now()
 
-	// Read a file
-	err := readFileEfficiently("input.txt")
+	// Compress the input file
+	err := compress("input.txt", "tmp.snappy")
 	if err != nil {
-		fmt.Println("Error reading file:", err)
-		return
+		log.Fatalf("Compression failed: %v", err)
 	}
 
-	// Write data to a file
-	data := []byte("Hello, world!")
-	err = writeFileEfficiently("output.txt", data)
+	// Decompress the file
+	err = decompress("tmp.snappy", "output.txt")
 	if err != nil {
-		fmt.Println("Error writing file:", err)
-		return
+		log.Fatalf("Decompression failed: %v", err)
 	}
 
-	elapsed := time.Since(start)
-	fmt.Println("File I/O completed in:", elapsed)
+	log.Printf("File operations completed in %v\n", time.Since(start))
+}
+
+func compress(inputPath, tmpPath string) error {
+	inputFile, err := os.Open(inputPath)
+	if err != nil {
+		return fmt.Errorf("error opening input file: %w", err)
+	}
+	defer inputFile.Close()
+
+	tmpFile, err := os.Create(tmpPath)
+	if err != nil {
+		return fmt.Errorf("error creating temporary file: %w", err)
+	}
+	defer tmpFile.Close()
+
+	writer := snappy.NewBufferedWriter(tmpFile)
+	defer writer.Close()
+
+	reader := bufio.NewReaderSize(inputFile, bufferSize)
+	for {
+		buf := make([]byte, bufferSize)
+		n, err := reader.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("error reading input file: %w", err)
+		}
+		if _, err := writer.Write(buf[:n]); err != nil {
+			return fmt.Errorf("error writing compressed data: %w", err)
+		}
+	}
+	return nil
+}
+
+func decompress(tmpPath, outputPath string) error {
+	tmpFile, err := os.Open(tmpPath)
+	if err != nil {
+		return fmt.Errorf("error opening temporary file: %w", err)
+	}
+	defer tmpFile.Close()
+
+	outputFile, err := os.Create(outputPath)
+	if err != nil {
+		return fmt.Errorf("error creating output file: %w", err)
+	}
+	defer outputFile.Close()
+
+	reader := snappy.NewReader(tmpFile)
+	if _, err := io.Copy(outputFile, reader); err != nil {
+		return fmt.Errorf("error writing decompressed data: %w", err)
+	}
+	return nil
 }
