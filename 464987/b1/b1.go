@@ -1,88 +1,91 @@
 package main  
 import (  
     "fmt"
-    "errors"
+    "log"
+    "strings"
 )
 
-type dashboard []string
-
-// Custom error type for slice operations
-type sliceError struct {
-    msg string
+// Custom error type to distinguish between scenarios
+type DashError struct {
+    message string
+    cause   error
 }
 
-func (e *sliceError) Error() string {
-    return fmt.Sprintf("slice error: %s", e.msg)
+func (e DashError) Error() string {
+    return fmt.Sprintf("%s: %s", e.message, e.cause)
 }
 
-// Function to append an element to the dashboard
-func (d *dashboard) Append(item string) error {
-    if d == nil {
-        return &sliceError{"cannot append to nil dashboard"}
+// Custom error for index out of bound
+func IndexOutOfBoundError(message string, cause error) error {
+    return DashError{message: message, cause: cause}
+}
+
+// Custom error for nil slice
+func NilSliceError(message string) error {
+    return DashError{message: message, cause: nil}
+}
+func fetchDataFromDatabase() ([]int, error) {  
+    data := []int{1, 2, 3}
+    // Simulate an error condition: accessing index out of bounds
+    return data[:len(data)+1], IndexOutOfBoundError("fetchDataFromDatabase: Slice index out of bounds", nil)
+}
+
+func calculateSliceSum(data []int) (int, error) {  
+    if data == nil {
+        return 0, NilSliceError("calculateSliceSum: Received nil slice")
     }
-    *d = append(*d, item)
+    total := 0
+    for _, value := range data {  
+        total += value
+    }
+    return total, nil
+}
+
+func displayDashboard(data []int, total int) error {  
+    // Handle nil slice gracefully
+    if data == nil {
+        log.Println("displayDashboard: Failed to calculate slice sum. Received nil slice.")
+        fmt.Println("Dashboard: An error occurred. Please try again later.")
+        return NilSliceError("displayDashboard: Failed to calculate slice sum. Received nil slice.")
+    }
+    // Handle other errors
+    if _, err := calculateSliceSum(data); err != nil {
+        wrappedErr := fmt.Errorf("displayDashboard: Failed to calculate slice sum: %w", err)
+        log.Println(wrappedErr)
+        fmt.Println("Dashboard: An error occurred. Please try again later.")  return wrappedErr
+    }
+
+    fmt.Println("Dashboard:")  
+    fmt.Println("--------------")  
+    fmt.Println("Slice Data:", data)  
+    fmt.Println("Total:", total)
+    fmt.Println("--------------")  
     return nil
-}
+}  
 
-// Function to get an element from the dashboard by index
-func (d dashboard) Get(index int) (string, error) {
-    if d == nil {
-        return "", &sliceError{"cannot get from nil dashboard"}
+func main() {  
+    data, err := fetchDataFromDatabase()  
+    if err != nil {
+        wrappedErr := fmt.Errorf("main: Failed to fetch data from database: %w", err)
+        log.Println(wrappedErr)
+        fmt.Println("An error occurred while fetching data. Please try again later.")
+        // You can add more error handling based on the custom error types
+        if strings.Contains(wrappedErr.Error(), "index out of bounds") {
+            fmt.Println("Hint: Please check your slice index ranges.")
+        }
+        return
     }
-    if index < 0 || index >= len(d) {
-        return "", &sliceError{"index out of bounds"}
+    
+    total, err := calculateSliceSum(data)  
+    if err != nil {
+        log.Println("main: Failed to calculate slice sum:", err)
+        fmt.Println("An error occurred while calculating the total. Please try again later.")
+        return
     }
-    return d[index], nil
-}
 
-// Function to update an element in the dashboard by index
-func (d *dashboard) Update(index int, item string) error {
-    if d == nil {
-        return &sliceError{"cannot update nil dashboard"}
-    }
-    if index < 0 || index >= len(*d) {
-        return &sliceError{"index out of bounds"}
-    }
-    (*d)[index] = item
-    return nil
-}
-
-func main() {
-    var d dashboard  // Initialize a nil dashboard
-    
-    // Test append
-    err := d.Append("Widget A")
+    err = displayDashboard(data, total)  
     if err != nil {
-        fmt.Println("Error appending to dashboard:", err)
-    }
-    
-    // Test get (from nil dashboard)
-    item, err := d.Get(0)
-    if err != nil {
-        fmt.Println("Error getting from dashboard:", err)
-    }
-    fmt.Println("Item at index 0:", item)
-    
-    // Test update (invalid index)
-    err = d.Update(-1, "Widget B")
-    if err != nil {
-        fmt.Println("Error updating dashboard:", err)
-    }
-    
-    // Create a valid dashboard and test operations
-    d = dashboard{"Widget C", "Widget D"}
-    
-    // Test get
-    item, err = d.Get(0)
-    if err != nil {
-        fmt.Println("Error getting from dashboard:", err)
-    }
-    fmt.Println("Item at index 0:", item)
-    
-    // Test update
-    err = d.Update(1, "Widget E")
-    if err != nil {
-        fmt.Println("Error updating dashboard:", err)
-    }
-    fmt.Println("Dashboard after update:", d)
-}
+        log.Println("main: Failed to display dashboard:", err)  
+        fmt.Println("An error occurred while displaying the dashboard. Please try again later.")
+    }  
+}  

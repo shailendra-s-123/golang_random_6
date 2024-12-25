@@ -1,121 +1,120 @@
-package main
-
-import (
-	"context"
-	"errors"
-	"fmt"
-	"math"
-	"math/rand"
-	"sync"
-	"time"
+package main  
+import (  
+    "context"
+    "fmt"
+    "math"
+    "runtime"
+    "sync"
+    "time"
 )
 
 // StockPrice represents a stock price entry.
 type StockPrice struct {
-	Date  time.Time
-	Price float64
+    Date  time.Time
+    Price float64
 }
 
-// CalculateStats calculates the sum, average, and standard deviation of stock prices for a given period.
-func CalculateStats(ctx context.Context, prices []StockPrice) (sum, average, stdDev float64, err error) {
-	wg := sync.WaitGroup{}
-	var results []float64
+// CalculateStats calculates the sum, average, and median of stock prices for a given period.
+func CalculateStats(ctx context.Context, prices []StockPrice, wg *sync.WaitGroup, results chan<- map[string]float64) {
+    defer wg.Done()
 
-	wg.Add(3)
-	// Calculate sum and average concurrently
-	go func() {
-		defer wg.Done()
-		sum, average, err = calculateSumAndAverage(prices)
-	}()
+    totalPrice := 0.0
+    count := 0
+    priceMap := make(map[float64]int)
 
-	// Calculate standard deviation concurrently
-	go func() {
-		defer wg.Done()
-		results = calculateStandardDeviation(prices, average)
-	}()
+    for _, price := range prices {
+        select {
+        case <-ctx.Done():
+            return // Cancel operation gracefully
+        default:
+            totalPrice += price.Price
+            count++
+            priceMap[price.Price]++
+        }
+    }
 
-	wg.Wait()
+    if count == 0 {
+        results <- nil
+        return
+    }
 
-	if err != nil {
-		return 0, 0, 0, err
-	}
+    // Calculate median
+    pricesSorted := make([]float64, 0, count)
+    for price, frequency := range priceMap {
+        for i := 0; i < frequency; i++ {
+            pricesSorted = append(pricesSorted, price)
+        }
+    }
+    median := calculateMedian(pricesSorted)
 
-	// Calculate standard deviation
-	if len(results) > 0 {
-		sumSquares := 0.0
-		for _, result := range results {
-			sumSquares += result * result
-		}
-		stdDev = math.Sqrt(sumSquares / float64(len(results)))
-	}
-
-	return
+    // Send results through the channel
+    results <- map[string]float64{
+        "Sum":    totalPrice,
+        "Average": totalPrice / float64(count),
+        "Median":  median,
+    }
 }
 
-// calculateSumAndAverage calculates the sum and average of stock prices.
-func calculateSumAndAverage(prices []StockPrice) (sum, average float64, err error) {
-	if len(prices) == 0 {
-		return 0, 0, errors.New("no prices to calculate")
-	}
+func calculateMedian(prices []float64) float64 {
+    length := len(prices)
+    if length == 0 {
+        return 0
+    }
 
-	var totalPrice float64
-	for _, price := range prices {
-		totalPrice += price.Price
-	}
-
-	return totalPrice, totalPrice / float64(len(prices)), nil
+    if length%2 == 0 {
+        mid1 := length / 2 - 1
+        mid2 := length / 2
+        return (prices[mid1] + prices[mid2]) / 2
+    } else {
+        mid := length / 2
+        return prices[mid]
+    }
 }
 
-// calculateStandardDeviation calculates the standard deviation of stock prices.
-func calculateStandardDeviation(prices []StockPrice, average float64) []float64 {
-	var deviations []float64
-	for _, price := range prices {
-		deviation := price.Price - average
-		deviations = append(deviations, deviation)
-	}
+// FilterPrices filters stock prices based on a given threshold.
+func FilterPrices(ctx context.Context, prices []StockPrice, threshold float64) []StockPrice {
+    var filteredPrices []StockPrice
 
-	return deviations
+    for _, price := range prices {
+        select {
+        case <-ctx.Done():
+            return nil // Cancel operation gracefully
+        default:
+            if price.Price > threshold {
+                filteredPrices = append(filteredPrices, price)
+            }
+        }
+    }
+
+    return filteredPrices
 }
 
-// FetchData simulates fetching stock price data with a random delay.
-func FetchData(ctx context.Context, numDays int) ([]StockPrice, error) {
-	if numDays <= 0 {
-		return nil, errors.New("numDays must be a positive integer")
-	}
+// AggregatePrices aggregates stock prices into daily buckets.
+func AggregatePrices(ctx context.Context, prices []StockPrice) map[time.Time]float64 {
+    priceBuckets := make(map[time.Time]float64)
 
-	// Simulate delay for data fetching
-	delay := time.Duration(rand.Intn(5)) * time.Second
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-time.After(delay):
-	}
+    for _, price := range prices {
+        select {
+        case <-ctx.Done():
+            return nil // Cancel operation gracefully
+        default:
+            priceBuckets[price.Date.Truncate(24*time.Hour)] += price.Price
+        }
+    }
 
-	// Generate random stock prices for the specified number of days
-	var prices []StockPrice
-	currentDate := time.Now()
-	for i := 0; i < numDays; i++ {
-		price := rand.Float64() * 100 // Generate random price between 0 and 100
-		prices = append(prices, StockPrice{Date: currentDate, Price: price})
-		currentDate = currentDate.AddDate(0, 0, 1)
-	}
-
-	return prices, nil
+    return priceBuckets
 }
 
-func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+// FetchData simulates fetching stock price data.
+func FetchData(ctx context.Context) ([]StockPrice, error) {
+    // Simulate fetching data from a database or API
+    // Delay for demonstration purposes
+    select {
+    case <-ctx.Done():
+        return nil, ctx.Err() // Cancel data fetching
+    case <-time.After(2 * time.Second):
+    }
 
-	numDays := 10
-	fmt.Printf("Fetching data for %d days...\n", numDays)
-
-	// Fetch stock price data
-	prices, err := FetchData(ctx, numDays)
-	if err != nil {
-		fmt.Printf("Error fetching data: %v\n", err)
-		return
-	}
-
-	// Calculate statistics
-	sum, average, stdDev, err := CalculateStats(ctx, prices)
+    // Example data
+    dates := []time.Time{
+        time.Date(2023, 10, 1, 0, 0, 0, 0, time.UTC),

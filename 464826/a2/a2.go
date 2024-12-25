@@ -3,60 +3,41 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
-	"math"
+	"sync"
 	"time"
 )
 
-// StockPrice represents a stock price entry with date and price.
+// StockPrice represents a stock price entry.
 type StockPrice struct {
 	Date  time.Time
 	Price float64
 }
 
-// FetchData simulates fetching stock prices from an external source.
-func FetchData(ctx context.Context) ([]StockPrice, error) {
-	// Simulate fetching data from a database or API with a delay
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err() // Return early if canceled
-	case <-time.After(3 * time.Second):
-	}
-
-	// Example financial data
-	dates := []time.Time{
-		time.Date(2023, 10, 1, 0, 0, 0, 0, time.UTC),
-		time.Date(2023, 10, 2, 0, 0, 0, 0, time.UTC),
-		time.Date(2023, 10, 3, 0, 0, 0, 0, time.UTC),
-		time.Date(2023, 10, 4, 0, 0, 0, 0, time.UTC),
-		time.Date(2023, 10, 5, 0, 0, 0, 0, time.UTC),
-	}
-
-	prices := []float64{100.0, 101.0, 102.0, 103.0, 104.0}
-
-	return zipData(dates, prices), nil
-}
-
-// zipData combines two slices into a slice of StockPrice.
-func zipData(dates []time.Time, prices []float64) []StockPrice {
-	var data []StockPrice
-	for i, date := range dates {
-		if i < len(prices) {
-			data = append(data, StockPrice{date, prices[i]})
+// FilterPrices filters stock prices based on a given minimum price.
+func FilterPrices(ctx context.Context, prices []StockPrice, minPrice float64) []StockPrice {
+	var filtered []StockPrice
+	for _, price := range prices {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			if price.Price >= minPrice {
+				filtered = append(filtered, price)
+			}
 		}
 	}
-	return data
+	return filtered
 }
 
-// CalculateStats calculates statistics on a set of stock prices.
-func CalculateStats(ctx context.Context, prices []StockPrice) (sum, average float64, err error) {
+// AggregatePrices computes sum and average of filtered stock prices.
+func AggregatePrices(ctx context.Context, prices []StockPrice) (sum, average float64) {
 	totalPrice := 0.0
 	count := 0
 
 	for _, price := range prices {
 		select {
 		case <-ctx.Done():
-			return 0, 0, ctx.Err() // Handle cancelation
+			return 0, 0
 		default:
 			totalPrice += price.Price
 			count++
@@ -64,70 +45,130 @@ func CalculateStats(ctx context.Context, prices []StockPrice) (sum, average floa
 	}
 
 	if count == 0 {
-		err = fmt.Errorf("no price data")
-		return
+		return 0, 0
 	}
 
-	return totalPrice, totalPrice / float64(count), nil
+	return totalPrice, totalPrice / float64(count)
 }
 
-// DetectTrends detects trends (upward or downward) in stock prices.
-func DetectTrends(ctx context.Context, prices []StockPrice) (upWard bool, err error) {
-	if len(prices) < 2 {
-		err = fmt.Errorf("not enough data to detect trends")
-		return
-	}
+// TransformPrices applies a transformation function to each price.
+func TransformPrices(ctx context.Context, prices []StockPrice, transform func(float64) float64) []float64 {
+	var transformed []float64
 
-	previousPrice := prices[0].Price
-	for _, price := range prices[1:] {
+	var wg sync.WaitGroup
+	chanSize := 100
+	chanJobs := make(chan *StockPrice, chanSize)
+	chanTransformed := make(chan float64, chanSize)
+
+	defer close(chanJobs)
+	defer close(chanTransformed)
+
+	// Worker goroutine
+	for {
 		select {
-		case <-ctx.Done():
-			return false, ctx.Err() // Handle cancelation
-		default:
-			if price.Price > previousPrice {
-				upWard = true
-			} else {
-				upWard = false
-				break
+		case item := <-chanJobs:
+			defer wg.Done()
+			price := item.Price
+			select {
+			case <-ctx.Done():
+				return nil
+			case chanTransformed <- transform(price):
 			}
-			previousPrice = price.Price
+		default:
+			if ctx.Err() != nil {
+				return nil
+			}
+			return transformed
 		}
 	}
 
-	return upWard, nil
+	// Main loop to send work
+	for _, price := range prices {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case chanJobs <- &price:
+			case <-ctx.Done():
+				return
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(chanTransformed)
+
+	for price := range chanTransformed {
+		transformed = append(transformed, price)
+	}
+
+	return transformed
+}
+
+// FetchData simulates fetching stock price data.
+func FetchData(ctx context.Context) ([]StockPrice, error) {
+	// Simulate fetching data from a database or API
+	dates := make([]time.Time, 1000000)
+	prices := make([]float64, 1000000)
+	for i := range dates {
+		dates[i] = time.Date(2023, 10, 1, i/24, i%24, 0, 0, time.UTC)
+		prices[i] = 100.0 + float64(i)/1000
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	return zipData(dates, prices), nil
+}
+
+// zipData combines two slices into a slice of StockPrice.
+func zipData(dates []time.Time, prices []float64) []StockPrice {
+	var data []StockPrice
+	for i := range dates {
+		if i < len(prices) {
+			data = append(data, StockPrice{dates[i], prices[i]})
+		}
+	}
+	return data
 }
 
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Fetch data with a chance to handle timeouts or cancelations
-	stockPrices, err := FetchData(ctx)
+	// Simulate fetching stock price data
+	prices, err := FetchData(ctx)
 	if err != nil {
-		log.Printf("Error fetching data: %v", err)
+		fmt.Printf("Error fetching data: %v\n", err)
 		return
 	}
 
-	// Calculate statistics
-	sum, average, err := CalculateStats(ctx, stockPrices)
-	if err != nil {
-		log.Printf("Error calculating stats: %v", err)
+	// Filter prices over $120
+	filteredPrices := FilterPrices(ctx, prices, 120.0)
+	if filteredPrices == nil {
+		fmt.Printf("Filtering canceled.\n")
 		return
 	}
 
-	// Detect trend in stock prices
-	upWard, err := DetectTrends(ctx, stockPrices)
-	if err != nil {
-		log.Printf("Error detecting trend: %v", err)
+	// Apply transformation: double each price
+	transformedPrices := TransformPrices(ctx, filteredPrices, func(p float64) float64 {
+		return p * 2
+	})
+	if transformedPrices == nil {
+		fmt.Printf("Transformation canceled.\n")
 		return
 	}
+
+	// Aggregate transformed prices
+	sum, average := AggregatePrices(ctx, filteredPrices)
 
 	// Display results
-	fmt.Printf("Sum of prices: %.2f\n", sum)
-	fmt.Printf("Average price: %.2f\n", average)
-	if upWard {
-		fmt.Println("Trend: Upward")
-	} else {
-		fmt.Println("Trend: Downward")
-	}
+	fmt.Printf("Filtered prices count: %d\n", len(filteredPrices))
+	fmt.Printf("First 10 filtered prices: %v\n", filteredPrices[:10])
+	fmt.Printf("First 10 transformed prices: %v\n", transformedPrices[:10])
+	fmt.Printf("Sum of filtered prices: %.2f\n", sum)
+	fmt.Printf("Average of filtered prices: %.2f\n", average)
 }

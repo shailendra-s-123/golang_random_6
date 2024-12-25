@@ -2,125 +2,140 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"sync"
 	"time"
 )
 
-// UserDataMap is an extended map type with versioning, logging, atomic operations, snapshots, and concurrency control.
-type UserDataMap struct {
-	data     map[string]interface{}
-	version  int64
-	logger   *log.Logger
-	mutex    *sync.RWMutex
-	snapshot map[string]interface{}
+// UserData represents a safe, concurrent map for user data using a read-write mutex.
+type UserData struct {
+	data  map[string]interface{}
+	mu    sync.RWMutex
 }
 
-// NewUserDataMap initializes a new UserDataMap.
-func NewUserDataMap() *UserDataMap {
-	return &UserDataMap{
-		data:    make(map[string]interface{}),
-		version: 0,
-		logger:  log.New(os.Stderr, "UserDataMap: ", log.LstdFlags),
-		mutex:   &sync.RWMutex{},
-		snapshot: make(map[string]interface{}),
+// NewUserData initializes a new UserData instance.
+func NewUserData() *UserData {
+	return &UserData{data: make(map[string]interface{})}
+}
+
+// Store stores a key-value pair in the UserData.
+func (ud *UserData) Store(key string, value interface{}) {
+	ud.mu.Lock()
+	defer ud.mu.Unlock()
+	ud.data[key] = value
+}
+
+// Load loads the value stored for the given key from UserData.
+func (ud *UserData) Load(key string) (value interface{}, ok bool) {
+	ud.mu.RLock()
+	defer ud.mu.RUnlock()
+	return ud.data[key], ok
+}
+
+// Delete deletes the key-value pair for the given key from UserData.
+func (ud *UserData) Delete(key string) {
+	ud.mu.Lock()
+	defer ud.mu.Unlock()
+	delete(ud.data, key)
+}
+
+// Range calls f sequentially for each key and value present in the map.
+// If f returns false, range stops the iteration.
+func (ud *UserData) Range(f func(key, value interface{}) bool) {
+	ud.mu.RLock()
+	defer ud.mu.RUnlock()
+	for key, value := range ud.data {
+		if !f(key, value) {
+			return
+		}
 	}
 }
 
-// Get retrieves a value for a given key, logging the operation.
-func (udm *UserDataMap) Get(key string) (interface{}, bool) {
-	udm.mutex.RLock()
-	defer udm.mutex.RUnlock()
-
-	udm.logger.Printf("Fetching data for key: %s", key)
-	return udm.data[key], udm.data[key] != nil
-}
-
-// Set sets or updates a key-value pair, logging the operation and updating the version.
-func (udm *UserDataMap) Set(key string, value interface{}) {
-	udm.mutex.Lock()
-	defer udm.mutex.Unlock()
-
-	udm.logger.Printf("Setting data for key: %s, value: %v", key, value)
-	udm.data[key] = value
-	udm.version++
-	udm.snapshot[key] = value
-}
-
-// Delete removes a key-value pair, logging the operation.
-func (udm *UserDataMap) Delete(key string) {
-	udm.mutex.Lock()
-	defer udm.mutex.Unlock()
-
-	udm.logger.Printf("Deleting data for key: %s", key)
-	delete(udm.data, key)
-	delete(udm.snapshot, key)
-	udm.version++
-}
-
-// GetVersion returns the current version of the map, useful for data consistency checks.
-func (udm *UserDataMap) GetVersion() int64 {
-	udm.mutex.RLock()
-	defer udm.mutex.RUnlock()
-
-	return udm.version
-}
-
-// Snapshot returns a copy of the current map state.
-func (udm *UserDataMap) Snapshot() map[string]interface{} {
-	udm.mutex.RLock()
-	defer udm.mutex.RUnlock()
-
-	snapshot := make(map[string]interface{})
-	for key, value := range udm.snapshot {
-		snapshot[key] = value
-	}
-	return snapshot
-}
-
-// Main function to demonstrate the usage of UserDataMap.
+// Main is the entry point of the program.
 func main() {
-	udm := NewUserDataMap()
+	// Create a new UserData instance.
+	userData := NewUserData()
 
-	// Set user data in multiple goroutines
+	// Store user data concurrently from multiple goroutines.
+	var wg sync.WaitGroup
+	wg.Add(3)
+
 	go func() {
-		for i := 0; i < 10; i++ {
-			udm.Set("user1", map[string]string{"name": "Alice", "email": fmt.Sprintf("alice%d@example.com", i)})
-			time.Sleep(time.Millisecond * 10)
-		}
+		userData.Store("user1", map[string]interface{}{
+			"name":  "Alice",
+			"age":   25,
+			"email": "alice@example.com",
+		})
+		wg.Done()
 	}()
 
 	go func() {
-		for i := 0; i < 10; i++ {
-			udm.Set("user2", map[string]string{"name": "Bob", "email": fmt.Sprintf("bob%d@example.com", i)})
-			time.Sleep(time.Millisecond * 5)
-		}
+		userData.Store("user2", map[string]interface{}{
+			"name":  "Bob",
+			"age":   30,
+			"email": "bob@example.com",
+		})
+		wg.Done()
 	}()
 
-	// Get user data in another goroutine
+	go func() {
+		userData.Store("user3", map[string]interface{}{
+			"name":  "Charlie",
+			"age":   22,
+			"email": "charlie@example.com",
+		})
+		wg.Done()
+	}()
+
+	// Wait for all stores to complete.
+	wg.Wait()
+
+	// Retrieve and print user data.
+	user1Data, ok := userData.Load("user1")
+	if ok {
+		fmt.Println("User 1 Data:", user1Data)
+	} else {
+		fmt.Println("User 1 Data not found.")
+	}
+
+	// Delete user2 data.
+	userData.Delete("user2")
+
+	// Range over all remaining user data.
+	fmt.Println("\nRemaining User Data:")
+	userData.Range(func(key, value interface{}) bool {
+		fmt.Println(key, ":", value)
+		return true // Continue iterating
+	})
+
+	// Simulate high concurrency with read operations.
+	fmt.Println("\nHigh Concurrency Reads:")
 	go func() {
 		for {
-			data, exists := udm.Get("user1")
-			if exists {
-				user := data.(map[string]string)
-				fmt.Printf("User: %s, Email: %s\n", user["name"], user["email"])
-			}
-			time.Sleep(time.Second * 2)
+			user1Data, _ := userData.Load("user1")
+			fmt.Println("User 1 Data:", user1Data)
+			time.Sleep(100 * time.Microsecond)
 		}
 	}()
 
-	// Take snapshot after a delay
-	time.Sleep(time.Second * 3)
-	snapshot := udm.Snapshot()
-	fmt.Printf("Current Snapshot:\n%v\n", snapshot)
-
-	// Delete user data in a goroutine
 	go func() {
-		udm.Delete("user1")
-		time.Sleep(time.Second)
+		for {
+			user2Data, _ := userData.Load("user2")
+			fmt.Println("User 2 Data:", user2Data)
+			time.Sleep(100 * time.Microsecond)
+		}
 	}()
 
-	// Get final version
-	version := udm.GetVersion()
-	fmt.Printf("Final Version: %d\n", version)
+	// Occasionally update user1 data.
+	go func() {
+		for {
+			user1Data, _ := userData.Load("user1")
+			user1Map := user1Data.(map[string]interface{})
+			user1Map["age"] = user1Map["age"].(int) + 1
+			userData.Store("user1", user1Map)
+			time.Sleep(1 * time.Second)
+		}
+	}()
+
+	// Wait forever.
+	select {}
 }

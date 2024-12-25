@@ -3,10 +3,10 @@ package main
 import (
 	"fmt"
 	"log"
-	_"net/http"
+	"net/http"
 	"runtime/pprof"
 	"sync"
-	_"time"
+	"time"
 )
 
 var (

@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"net/http"
-	"time"
 )
 
 // Custom error types for specific scenarios
@@ -38,26 +36,19 @@ type User struct {
 // Fallback mechanism: Default user
 var fallbackUser = User{ID: 999, Name: "Default User"}
 
-// FetchUsers simulates fetching users from a database with a retry mechanism
-func FetchUsers(retries int, initialBackoff time.Duration) ([]User, error) {
+// FetchUsers simulates fetching users from a database
+func FetchUsers() ([]User, error) {
 	// Simulated data
 	users := []User{
 		{ID: 1, Name: "Alice"},
 		{ID: 2, Name: "Bob"},
 	}
 
-	for attempt := 0; attempt <= retries; attempt++ {
-		// Simulated transient error
-		if attempt%2 == 0 {
-			return nil, WrapError("FetchUsers", errors.New("temporary database error"))
-		}
-		if len(users) == 0 {
-			return nil, WrapError("FetchUsers", ErrNoUsersFound)
-		}
-		return users, nil
+	// Simulated edge case: Empty user list
+	if len(users) == 0 {
+		return nil, WrapError("FetchUsers", ErrNoUsersFound)
 	}
-
-	return nil, WrapError("FetchUsers", errors.New("maximum retries reached"))
+	return users, nil
 }
 
 // FindUser searches for a user by ID, providing a fallback user if not found
@@ -84,32 +75,9 @@ func CalculateSum(data []int) (int, error) {
 	return total, nil
 }
 
-// RetryWithExponentialBackoff retries a function with exponential backoff
-func RetryWithExponentialBackoff(retries int, initialBackoff time.Duration, fn func() (interface{}, error)) (interface{}, error) {
-	for attempt := 0; attempt <= retries; attempt++ {
-		result, err := fn()
-		if err == nil {
-			log.Printf("Attempt %d successful: %v\n", attempt, result)
-			return result, nil
-		}
-
-		log.Printf("Attempt %d failed: %v. Retrying...\n", attempt, err)
-
-		backoff := math.Pow(2.0, float64(attempt)) * initialBackoff.Seconds()
-		time.Sleep(time.Duration(backoff))
-	}
-	log.Printf("Maximum retries reached. Aborting.\n")
-	return nil, errors.New("maximum retries reached")
-}
-
 // UserDashboardHandler handles the /user/dashboard endpoint
 func UserDashboardHandler(w http.ResponseWriter, r *http.Request) {
-	retries := 3
-	initialBackoff := 100 * time.Millisecond
-
-	users, err := RetryWithExponentialBackoff(retries, initialBackoff, func() ([]User, error) {
-		return FetchUsers(retries, initialBackoff)
-	})
+	users, err := FetchUsers()
 	if err != nil {
 		log.Printf("Error: %v\n", err)
 		http.Error(w, "Unable to fetch users. Please try again later.", http.StatusInternalServerError)
@@ -117,7 +85,7 @@ func UserDashboardHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := 3 // Simulate an invalid user ID
-	user, err := FindUser(users.([]User), userID)
+	user, err := FindUser(users, userID)
 	if err != nil {
 		log.Printf("Error: %v\n", err)
 	}

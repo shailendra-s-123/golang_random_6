@@ -1,97 +1,92 @@
-package main  
-import (  
-    "fmt"
-    "strings"
+package main
+
+import (
+	"fmt"
+	"strings"
+	"time"
 )
 
-// Define a UserResponse struct to store user response for each question
-type UserResponse struct {
-    Question   string
-    Answer     string
-    IsCorrect bool
+type Question struct {
+	Text         string
+	CorrectAnswer string
+	Responses    []string
+	ResponseTimes []time.Duration
+	Skipped      []bool
 }
 
-func main() {  
-    // Sample questions
-    questions := []string{
-        "What is the capital of France?",
-        "What is 2 + 2?",
-        "What is the largest ocean?",
-    }
-    // Sample correct answers
-    correctAnswers := []string{"Paris", "4", "Pacific Ocean"}
-    var responses []UserResponse
-    
-    // Simulate user responses
-    userResponses := [][]string{
-        {"Paris", "2", "Atlantic Ocean"},
-        {"Berlin", "4", "Pacific Ocean"},
-        {"Paris", "3", "Pacific Ocean"},
-        {"Berlin", "5", "Indian Ocean"},
-        {"Paris", "4", "Atlantic Ocean"},
-    }
-    
-    // Process user responses and store in slices
-    for i, userAnswer := range userResponses {
-        for j, ans := range userAnswer {
-            isCorrect := strings.ToLower(ans) == strings.ToLower(correctAnswers[j])
-            responses = append(responses, UserResponse{
-                Question: questions[j],
-                Answer:   ans,
-                IsCorrect: isCorrect,
-            })
-        }
-    }
-    
-    // Aggregate data and calculate insights
-    correctCount, responseFrequencies, mostCommonIncorrect := aggregateData(responses)
-    userPerformance := calculateUserPerformance(correctCount, len(responses))
+// Function to calculate the average response time for a question
+func averageResponseTime(question Question) time.Duration {
+	totalTime := time.Duration(0)
+	count := 0
+	for i, response := range question.Responses {
+		if !question.Skipped[i] {
+			totalTime += question.ResponseTimes[i]
+			count++
+		}
+	}
+	if count == 0 {
+		return time.Duration(0)
+	}
+	return totalTime / time.Duration(count)
+}
 
-    // Display insights
-    fmt.Println("Analysis Insights:")
-    fmt.Println("--------------------")
-    fmt.Printf("Total correct answers: %d\n", correctCount)
-    fmt.Println("Response Frequencies:")
-    for answer, freq := range responseFrequencies {
-        fmt.Printf("%s: %d\n", answer, freq)
-    }
-    fmt.Println("Most common incorrect answers:")
-    for _, incorrect := range mostCommonIncorrect {
-        fmt.Println(incorrect)
-    }
-    fmt.Printf("User Performance: %.2f%%\n", userPerformance)
+// Function to find the question with the most skips
+func mostSkippedQuestion(questions []Question) (string, int) {
+	maxSkips := 0
+	mostSkipped := ""
+	for _, question := range questions {
+		skips := 0
+		for _, skipped := range question.Skipped {
+			if skipped {
+				skips++
+			}
+		}
+		if skips > maxSkips {
+			maxSkips = skips
+			mostSkipped = question.Text
+		}
+	}
+	return mostSkipped, maxSkips
+}
+
+func printInsights(questions []Question) {
+	// Existing insights...
+	fmt.Println("\n-- Additional Insights --")
+
+	for i, question := range questions {
+		fmt.Printf("\nQuestion %d: %s\n", i+1, question.Text)
+		fmt.Printf("Average response time: %s\n", averageResponseTime(question))
+	}
+
+	mostSkipped, maxSkips := mostSkippedQuestion(questions)
+	fmt.Printf("\nQuestion with the most skips: %s (Skipped %d times)\n", mostSkipped, maxSkips)
+}
+
+func main() {
+	questions := []Question{
+		// Existing questions...
+	}
+
+	// Collect responses and analyze additional data
+	for i, question := range questions {
+		fmt.Printf("Question %d: %s\n", i+1, question.Text)
+		var response string
+		fmt.Scanln(&response)
+
+		startTime := time.Now()
+		// Process user response and add it to the corresponding slices
+		question.Responses = append(question.Responses, response)
+
+		if strings.ToLower(response) == "skip" {
+			question.Skipped = append(question.Skipped, true)
+			question.ResponseTimes = append(question.ResponseTimes, time.Duration(0))
+		} else {
+			question.Skipped = append(question.Skipped, false)
+			question.ResponseTimes = append(question.ResponseTimes, time.Since(startTime))
+		}
+	}
+
+	// Print insights
+	printInsights(questions)
 }
  
-func aggregateData(responses []UserResponse) (int, map[string]int, []string) {
-    correctCount := 0
-    responseFrequencies := make(map[string]int)
-    incorrectAnswers := make(map[string]int)
-    mostCommonIncorrect := []string{}
-
-    for _, response := range responses {
-        if response.IsCorrect {
-            correctCount++
-        }
-        responseFrequencies[response.Answer]++
-        if !response.IsCorrect {
-            incorrectAnswers[response.Answer]++
-        }
-    }
-    
-    // Find the most common incorrect answer(s)
-    maxIncorrectCount := 0
-    for answer, count := range incorrectAnswers {
-        if count > maxIncorrectCount {
-            mostCommonIncorrect = []string{answer}
-            maxIncorrectCount = count
-        } else if count == maxIncorrectCount {
-            mostCommonIncorrect = append(mostCommonIncorrect, answer)
-        }
-    }
-
-    return correctCount, responseFrequencies, mostCommonIncorrect
-}
-
-func calculateUserPerformance(correctCount int, totalResponses int) float64 {
-    return float64(correctCount) / float64(totalResponses) * 100
-} 

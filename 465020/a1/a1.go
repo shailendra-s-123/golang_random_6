@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 	"sync/atomic"
-	_"time"
+	"time"
 )
 
 // UserDataMap extends a standard map to provide resilience and versioning features.

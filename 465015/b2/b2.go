@@ -3,79 +3,70 @@ package main
 import (
     "fmt"
     "sync"
-    "sync/atomic"
 )
 
-type userData struct {
-    // Replace this with actual user data structure
+type User struct {
+    ID   int
     Name string
 }
 
 var (
-    userDB   sync.Map
-    nextKey uint64
+    users    = make(map[int]*User)
+    userLock sync.Mutex
 )
 
-func generateUniqueKey() uint64 {
-    return atomic.AddUint64(&nextKey, 1)
+func addUser(name string) {
+    userLock.Lock()
+    defer userLock.Unlock()
+
+    // Generate a new unique ID for the user
+    nextID := len(users) + 1
+
+    // Create a new user and store it in the map with the unique ID
+    users[nextID] = &User{
+        ID:   nextID,
+        Name: name,
+    }
 }
 
-func addUser(name string) uint64 {
-    // Ensure name is not empty
-    if name == "" {
-        return 0 // Return 0 to indicate invalid input
-    }
-    // Generate a unique key using atomic.AddUint64
-    key := generateUniqueKey()
-    // Store the user data in the sync.Map
-    userDB.Store(key, &userData{Name: name})
-    return key
+func getUser(id int) *User {
+    userLock.Lock()
+    defer userLock.Unlock()
+
+    // Return the user associated with the given ID from the map
+    return users[id]
 }
 
-func getUser(key uint64) (*userData, bool) {
-    // Load the user data from the sync.Map
-    value, ok := userDB.Load(key)
-    if !ok {
-        return nil, false // User not found
-    }
-    // Assert the value to userData type
-    user, ok := value.(*userData)
-    if !ok {
-        return nil, false // Internal error, unexpected data type
-    }
-    return user, true
-}
+func deleteUser(id int) {
+    userLock.Lock()
+    defer userLock.Unlock()
 
-func deleteUser(key uint64) {
-    // Delete the user data from the sync.Map
-    userDB.Delete(key)
+    // Delete the user associated with the given ID from the map
+    delete(users, id)
 }
 
 func main() {
-    // Example usage:
-    key1 := addUser("Alice")
-    if key1 == 0 {
-        fmt.Println("Failed to add user: Alice")
-    } else {
-        fmt.Println("User added with key:", key1)
-    }
-    
-    key2 := addUser("Bob")
-    if key2 == 0 {
-        fmt.Println("Failed to add user: Bob")
-    } else {
-        fmt.Println("User added with key:", key2)
-    }
-    
-    // Get user data
-    user1, ok := getUser(key1)
-    if !ok {
-        fmt.Println("User not found:", key1)
-    } else {
-        fmt.Println("User found:", user1.Name)
+    // Add multiple users concurrently
+    go addUser("Alice")
+    go addUser("Bob")
+    go addUser("Charlie")
+
+    // Wait for all users to be added
+    // In a real application, you would use proper synchronization
+    // to wait for all goroutines to finish.
+    fmt.Scanln()
+
+    // Get and print user information
+    for _, user := range users {
+        fmt.Printf("User ID: %d, Name: %s\n", user.ID, user.Name)
     }
 
-    // Delete user
-    deleteUser(key2)
-}  
-                     
+    // Delete a user
+    deleteUser(2)
+
+    // Get and print user information after deletion
+    fmt.Println("Users after deletion:")
+    for _, user := range users {
+        fmt.Printf("User ID: %d, Name: %s\n", user.ID, user.Name)
+    }
+}
