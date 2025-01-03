@@ -79,7 +79,59 @@ func (ud *UserData) Delete(key string) {
 func (ud *UserData) Version() uint64 {
 	return atomic.LoadUint64(&ud.version)
 }
-
 func main() {
-  // ... (Same as before)
+    // Create a new UserData instance.
+    userData := new(UserData)
+
+    // Store user data concurrently from multiple goroutines.
+    var wg sync.WaitGroup
+    wg.Add(3)
+
+    go func() {
+        userData.Store("user1", map[string]interface{}{
+            "name":  "Alice",
+            "age":   25,
+            "email": "alice@example.com",
+        })
+        wg.Done()
+    }()
+
+    go func() {
+        userData.Store("user2", map[string]interface{}{
+            "name":  "Bob",
+            "age":   30,
+            "email": "bob@example.com",
+        })
+        wg.Done()
+    }()
+
+    go func() {
+        userData.Store("user3", map[string]interface{}{
+            "name":  "Charlie",
+            "age":   22,
+            "email": "charlie@example.com",
+        })
+        wg.Done()
+    }()
+
+    // Wait for all stores to complete.
+    wg.Wait()
+
+    // Retrieve and print user data.
+    user1Data, ok := userData.Load("user1")
+    if ok {
+        fmt.Println("User 1 Data:", user1Data)
+    } else {
+        fmt.Println("User 1 Data not found.")
+    }
+
+    // Delete user2 data.
+    userData.Delete("user2")
+
+    // Range over all remaining user data.
+    fmt.Println("Remaining User Data:")
+    userData.Range(func(key, value interface{}) bool {
+        fmt.Println(key, ":", value)
+        return true // Continue iterating
+    })
 }
